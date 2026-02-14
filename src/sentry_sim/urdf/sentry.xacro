@@ -1,0 +1,606 @@
+<?xml version="1.0"?>
+<!-- XML声明，必须放在第一行 -->
+
+<robot name="autoaim_car" xmlns:xacro="http://www.ros.org/wiki/xacro">
+<!-- 
+  robot标签：整个机器人的根标签
+  - name: 机器人名字
+  - xmlns:xacro: 声明使用xacro语法（可以用变量、宏等高级功能）
+-->
+
+  <!-- ========== 第一部分：定义常量变量 ========== -->
+  <!-- 用xacro:property定义变量，后面可以用${变量名}引用 -->
+  
+  <xacro:property name="PI" value="3.14159265359"/>
+  <!-- 定义π，方便计算角度 -->
+  
+  <!-- 底盘尺寸 -->
+  <xacro:property name="chassis_length" value="0.6"/>  <!-- 底盘长度：0.6米 -->
+  <xacro:property name="chassis_width" value="0.4"/>   <!-- 底盘宽度：0.4米 -->
+  <xacro:property name="chassis_height" value="0.15"/> <!-- 底盘高度：0.15米 -->
+  <xacro:property name="chassis_mass" value="10.0"/>   <!-- 底盘质量：10kg -->
+  
+  <!-- 轮子尺寸 -->
+  <xacro:property name="wheel_radius" value="0.1"/>    <!-- 轮子半径：0.1米 -->
+  <xacro:property name="wheel_width" value="0.05"/>    <!-- 轮子宽度：0.05米 -->
+  <xacro:property name="wheel_mass" value="0.5"/>      <!-- 轮子质量：0.5kg -->
+  <xacro:property name="wheel_separation" value="0.5"/><!-- 左右轮间距：0.5米 -->
+  <xacro:property name="wheel_base" value="0.4"/>      <!-- 前后轮轴距：0.4米 -->
+
+
+  <!-- ========== 第二部分：底盘（base_link） ========== -->
+  <link name="base_link">
+  <!-- 
+    link标签：定义机器人的一个刚体部分
+    name="base_link" 是ROS的惯例，表示机器人的主体/底盘
+  -->
+  
+    <!-- 视觉外观（你在Gazebo/RViz里看到的样子） -->
+    <visual>
+      <geometry>
+        <!-- 几何形状：长方体 -->
+        <box size="${chassis_length} ${chassis_width} ${chassis_height}"/>
+        <!-- size="长 宽 高"，用${变量名}引用之前定义的变量 -->
+      </geometry>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <!-- 
+        origin: 相对于link坐标系的偏移
+        xyz="x y z": 位置偏移（米）
+        rpy="roll pitch yaw": 姿态（弧度）
+        这里都是0，表示几何中心就在link坐标原点
+      -->
+      <material name="blue">
+        <!-- 材质/颜色 -->
+        <color rgba="0 0 0.8 1"/>
+        <!-- rgba="红 绿 蓝 透明度"，取值0-1，这里是蓝色 -->
+      </material>
+    </visual>
+
+    <!-- 碰撞体（物理引擎用来计算碰撞） -->
+    <collision>
+      <geometry>
+        <box size="${chassis_length} ${chassis_width} ${chassis_height}"/>
+        <!-- 通常和visual一样，简化计算可以用更简单的形状 -->
+      </geometry>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+    </collision>
+
+    <!-- 惯性参数（物理模拟必须，影响加速度、旋转等） -->
+    <inertial>
+      <mass value="${chassis_mass}"/>
+      <!-- 质量（kg） -->
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <!-- 质心位置 -->
+      <inertia ixx="0.1" ixy="0.0" ixz="0.0"
+               iyy="0.1" iyz="0.0" izz="0.1"/>
+      <!-- 
+        惯性矩阵（kg·m²）
+        对于长方体，可以用公式计算：
+        ixx = m/12 * (h² + w²)
+        iyy = m/12 * (l² + h²)
+        izz = m/12 * (l² + w²)
+        简单场景用近似值也可以
+      -->
+    </inertial>
+  </link>
+
+
+  <!-- ========== 第三部分：轮子宏定义 ========== -->
+  <!-- 
+    xacro:macro 宏定义：避免重复代码
+    类似编程里的函数，定义一次，调用多次
+  -->
+  <xacro:macro name="wheel" params="prefix suffix reflect_x reflect_y">
+  <!-- 
+    macro name="宏名字" params="参数列表"
+    params里的每个参数用空格分隔
+    调用时传入不同参数，生成不同的轮子
+  -->
+  
+    <link name="${prefix}_${suffix}_wheel">
+    <!-- 
+      用${}引用参数
+      例如：prefix="front", suffix="left"
+      生成的link名字是 "front_left_wheel"
+    -->
+    
+      <visual>
+        <geometry>
+          <cylinder radius="${wheel_radius}" length="${wheel_width}"/>
+          <!-- 圆柱体：半径和长度 -->
+        </geometry>
+        <origin xyz="0 0 0" rpy="${PI/2} 0 0"/>
+        <!-- 
+          rpy="${PI/2} 0 0" 表示绕x轴旋转90度
+          因为cylinder默认沿z轴，我们要让它沿y轴（横着当轮子）
+        -->
+        <material name="black">
+          <color rgba="0.1 0.1 0.1 1"/>
+          <!-- 深灰色（接近黑色） -->
+        </material>
+      </visual>
+
+      <collision>
+        <geometry>
+          <cylinder radius="${wheel_radius}" length="${wheel_width}"/>
+        </geometry>
+        <origin xyz="0 0 0" rpy="${PI/2} 0 0"/>
+      </collision>
+
+      <inertial>
+        <mass value="${wheel_mass}"/>
+        <origin xyz="0 0 0" rpy="${PI/2} 0 0"/>
+        <inertia ixx="0.01" ixy="0" ixz="0"
+                 iyy="0.01" iyz="0" izz="0.01"/>
+        <!-- 圆柱体惯性矩：I = m*r²/2 (轴向), I = m*(3r²+h²)/12 (径向) -->
+      </inertial>
+    </link>
+
+    <!-- 轮子和底盘的连接关节 -->
+    <joint name="${prefix}_${suffix}_wheel_joint" type="continuous">
+    <!-- 
+      joint标签：连接两个link
+      name: 关节名字
+      type: 关节类型
+        - fixed: 固定不动
+        - revolute: 有限角度旋转
+        - continuous: 无限旋转（轮子用这个）
+        - prismatic: 直线滑动
+    -->
+    
+      <parent link="base_link"/>
+      <!-- 父link：底盘 -->
+      <child link="${prefix}_${suffix}_wheel"/>
+      <!-- 子link：这个轮子 -->
+      
+      <origin xyz="${reflect_x * wheel_base/2} ${reflect_y * wheel_separation/2} 0" rpy="0 0 0"/>
+      <!-- 
+        轮子相对底盘的位置
+        reflect_x 和 reflect_y 是±1，用来控制前后左右
+        例如：
+          前左轮：reflect_x=1, reflect_y=1  → xyz="0.2  0.25 0"
+          前右轮：reflect_x=1, reflect_y=-1 → xyz="0.2 -0.25 0"
+          后左轮：reflect_x=-1, reflect_y=1 → xyz="-0.2  0.25 0"
+      -->
+      
+      <axis xyz="0 1 0"/>
+      <!-- 
+        旋转轴方向
+        xyz="0 1 0" 表示绕y轴旋转（前进方向是x轴）
+      -->
+      
+      <dynamics damping="0.1" friction="0.1"/>
+      <!-- 
+        动力学参数：
+        damping: 阻尼（类似摩擦，让轮子不会无限转）
+        friction: 摩擦力
+      -->
+    </joint>
+
+    <!-- Gazebo专用：设置轮子的物理属性 -->
+    <gazebo reference="${prefix}_${suffix}_wheel">
+    <!-- 
+      gazebo标签：Gazebo仿真器的特殊设置
+      reference: 指定对哪个link生效
+    -->
+    
+      <mu1>1.0</mu1>
+      <mu2>1.0</mu2>
+      <!-- 
+        mu1, mu2: 摩擦系数（0-1之间）
+        1.0表示高摩擦，轮子不容易打滑
+      -->
+      
+      <kp>1000000.0</kp>
+      <kd>100.0</kd>
+      <!-- 
+        kp: 接触刚度（contact stiffness）
+        kd: 接触阻尼（contact damping）
+        越大越"硬"，碰撞时弹性越小
+      -->
+      
+      <material>Gazebo/Black</material>
+      <!-- Gazebo预定义的材质/颜色 -->
+    </gazebo>
+    
+  </xacro:macro>
+  <!-- 宏定义结束 -->
+
+
+  <!-- ========== 第四部分：调用宏生成四个轮子 ========== -->
+  <!-- 
+    xacro:轮子宏名 参数1="值1" 参数2="值2" ...
+  -->
+  <xacro:wheel prefix="front" suffix="left"  reflect_x="1"  reflect_y="1"/>
+  <!-- 前左轮：在底盘前面(+x)、左边(+y) -->
+  
+  <xacro:wheel prefix="front" suffix="right" reflect_x="1"  reflect_y="-1"/>
+  <!-- 前右轮：在底盘前面(+x)、右边(-y) -->
+  
+  <xacro:wheel prefix="rear"  suffix="left"  reflect_x="-1" reflect_y="1"/>
+  <!-- 后左轮：在底盘后面(-x)、左边(+y) -->
+  
+  <xacro:wheel prefix="rear"  suffix="right" reflect_x="-1" reflect_y="-1"/>
+  <!-- 后右轮：在底盘后面(-x)、右边(-y) -->
+
+
+  <!-- ========== 第五部分：云台Yaw轴（水平旋转） ========== -->
+  <link name="gimbal_yaw_base">
+  <!-- 云台的底座，负责水平旋转 -->
+  
+    <visual>
+      <geometry>
+        <cylinder radius="0.08" length="0.1"/>
+        <!-- 小圆柱作为云台底座 -->
+      </geometry>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <material name="gray">
+        <color rgba="0.5 0.5 0.5 1"/>
+        <!-- 灰色 -->
+      </material>
+    </visual>
+
+    <collision>
+      <geometry>
+        <cylinder radius="0.08" length="0.1"/>
+      </geometry>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+    </collision>
+
+    <inertial>
+      <mass value="0.5"/>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <inertia ixx="0.001" ixy="0" ixz="0"
+               iyy="0.001" iyz="0" izz="0.001"/>
+    </inertial>
+  </link>
+
+  <joint name="gimbal_yaw_joint" type="revolute">
+  <!-- 
+    revolute: 有限角度旋转（需要定义上下限）
+    这是云台的yaw轴，控制水平转动
+  -->
+  
+    <parent link="base_link"/>
+    <!-- 父link：底盘 -->
+    
+    <child link="gimbal_yaw_base"/>
+    <!-- 子link：云台底座 -->
+    
+    <origin xyz="0 0 ${chassis_height/2 + 0.05}" rpy="0 0 0"/>
+    <!-- 
+      安装在底盘上方
+      z坐标 = 底盘高度的一半 + 0.05米（稍微抬高一点）
+    -->
+    
+    <axis xyz="0 0 1"/>
+    <!-- 
+      绕z轴旋转（竖直方向）
+      这样云台可以水平左右转
+    -->
+    
+    <limit lower="${-PI}" upper="${PI}" effort="10.0" velocity="2.0"/>
+    <!-- 
+      limit: revolute类型必须定义
+      lower/upper: 角度下限/上限（弧度），-π到π表示可以转整圈
+      effort: 最大力矩（N·m）
+      velocity: 最大角速度（rad/s）
+    -->
+    
+    <dynamics damping="0.7" friction="0.0"/>
+  </joint>
+
+
+  <!-- ========== 第六部分：云台Pitch轴（俯仰） ========== -->
+  <link name="gimbal_pitch_link">
+  <!-- 云台的俯仰部分 -->
+  
+    <visual>
+      <geometry>
+        <box size="0.15 0.1 0.08"/>
+        <!-- 长方体，作为云台的"头部" -->
+      </geometry>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <material name="red">
+        <color rgba="0.8 0 0 1"/>
+        <!-- 红色，方便区分 -->
+      </material>
+    </visual>
+
+    <collision>
+      <geometry>
+        <box size="0.15 0.1 0.08"/>
+      </geometry>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+    </collision>
+
+    <inertial>
+      <mass value="0.3"/>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <inertia ixx="0.0005" ixy="0" ixz="0"
+               iyy="0.0008" iyz="0" izz="0.0005"/>
+    </inertial>
+  </link>
+
+  <joint name="gimbal_pitch_joint" type="revolute">
+  <!-- 云台的pitch轴，控制上下俯仰 -->
+  
+    <parent link="gimbal_yaw_base"/>
+    <!-- 父link：云台底座（yaw轴的输出） -->
+    
+    <child link="gimbal_pitch_link"/>
+    <!-- 子link：云台俯仰部分 -->
+    
+    <origin xyz="0.05 0 0.05" rpy="0 0 0"/>
+    <!-- 
+      稍微往前(+x)、往上(+z)
+      让相机有个合适的位置
+    -->
+    
+    <axis xyz="0 1 0"/>
+    <!-- 
+      绕y轴旋转（左右方向）
+      这样云台可以上下俯仰
+    -->
+    
+    <limit lower="${-PI/4}" upper="${PI/4}" effort="10.0" velocity="2.0"/>
+    <!-- 
+      -45度到+45度（-π/4 到 π/4）
+      限制俯仰角度，避免碰到底盘
+    -->
+    
+    <dynamics damping="0.7" friction="0.0"/>
+  </joint>
+
+
+  <!-- ========== 第七部分：相机 ========== -->
+  <link name="camera_link">
+  <!-- 相机link，安装在云台上 -->
+  
+    <visual>
+      <geometry>
+        <box size="0.03 0.08 0.03"/>
+        <!-- 小长方体表示相机 -->
+      </geometry>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <material name="green">
+        <color rgba="0 0.8 0 1"/>
+        <!-- 绿色 -->
+      </material>
+    </visual>
+
+    <collision>
+      <geometry>
+        <box size="0.03 0.08 0.03"/>
+      </geometry>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+    </collision>
+
+    <inertial>
+      <mass value="0.1"/>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <inertia ixx="0.0001" ixy="0" ixz="0"
+               iyy="0.0001" iyz="0" izz="0.0001"/>
+    </inertial>
+  </link>
+
+  <joint name="camera_joint" type="fixed">
+  <!-- 
+    fixed: 固定连接，不能动
+    相机固定在云台俯仰部分上
+  -->
+  
+    <parent link="gimbal_pitch_link"/>
+    <child link="camera_link"/>
+    <origin xyz="0.08 0 0" rpy="0 0 0"/>
+    <!-- 往前伸出0.08米，让相机在云台前方 -->
+  </joint>
+
+
+  <!-- ========== 第八部分：Gazebo插件 - 差速驱动 ========== -->
+  <gazebo>
+    <plugin name="differential_drive_controller" filename="libgazebo_ros_diff_drive.so">
+    <!-- 
+      插件名：libgazebo_ros_diff_drive.so
+      功能：控制差速驱动机器人（两轮独立控制）
+    -->
+    
+      <update_rate>50</update_rate>
+      <!-- 更新频率：50 Hz -->
+      
+      <left_joint>front_left_wheel_joint</left_joint>
+      <right_joint>front_right_wheel_joint</right_joint>
+      <!-- 
+        指定左右轮的joint名字
+        插件会控制这两个joint的转速
+        (这里用前轮驱动，也可以用后轮)
+      -->
+      
+      <wheel_separation>${wheel_separation}</wheel_separation>
+      <!-- 左右轮间距（米），影响转弯半径 -->
+      
+      <wheel_diameter>${2*wheel_radius}</wheel_diameter>
+      <!-- 轮子直径（米），影响速度换算 -->
+      
+      <max_wheel_torque>20</max_wheel_torque>
+      <!-- 最大扭矩（N·m） -->
+      
+      <max_wheel_acceleration>1.0</max_wheel_acceleration>
+      <!-- 最大加速度 -->
+      
+      <command_topic>cmd_vel</command_topic>
+      <!-- 
+        订阅的topic名字
+        你的C++代码发布 geometry_msgs/Twist 到这个topic
+        插件收到后会控制轮子转动
+      -->
+      
+      <publish_odom>true</publish_odom>
+      <!-- 是否发布里程计信息 -->
+      
+      <publish_odom_tf>true</publish_odom_tf>
+      <!-- 是否发布odom→base_link的TF变换 -->
+      
+      <publish_wheel_tf>false</publish_wheel_tf>
+      <!-- 是否发布轮子的TF（一般不需要） -->
+      
+      <odometry_topic>odom</odometry_topic>
+      <!-- 发布里程计的topic名字 -->
+      
+      <odometry_frame>odom</odometry_frame>
+      <!-- 里程计坐标系名字 -->
+      
+      <robot_base_frame>base_link</robot_base_frame>
+      <!-- 机器人底盘坐标系名字 -->
+    </plugin>
+  </gazebo>
+
+
+  <!-- ========== 第九部分：Gazebo插件 - 关节状态发布 ========== -->
+  <gazebo>
+    <plugin name="joint_state_publisher" filename="libgazebo_ros_joint_state_publisher.so">
+    <!-- 
+      插件名：libgazebo_ros_joint_state_publisher.so
+      功能：发布关节的当前状态（角度、速度等）
+    -->
+    
+      <update_rate>50</update_rate>
+      
+      <joint_name>gimbal_yaw_joint</joint_name>
+      <joint_name>gimbal_pitch_joint</joint_name>
+      <!-- 
+        指定要发布的关节
+        插件会发布这些关节的实时状态到 /joint_states topic
+        类型：sensor_msgs/JointState
+      -->
+    </plugin>
+  </gazebo>
+
+
+  <!-- ========== 第十部分：Gazebo插件 - 相机传感器 ========== -->
+  <gazebo reference="camera_link">
+  <!-- 
+    这个gazebo标签指定作用于camera_link
+    在这个link上添加传感器
+  -->
+  
+    <sensor type="camera" name="camera_sensor">
+    <!-- 
+      sensor type="camera": 相机传感器
+      name: 传感器名字
+    -->
+    
+      <update_rate>30.0</update_rate>
+      <!-- 相机帧率：30 FPS -->
+      
+      <camera name="head">
+        <horizontal_fov>1.3962634</horizontal_fov>
+        <!-- 
+          水平视野角（弧度）
+          1.3962634 rad ≈ 80度
+        -->
+        
+        <image>
+          <width>640</width>
+          <height>480</height>
+          <format>R8G8B8</format>
+          <!-- 图像格式：RGB，每个通道8位 -->
+        </image>
+        
+        <clip>
+          <near>0.02</near>
+          <far>300</far>
+          <!-- 
+            渲染距离：
+            near: 最近0.02米
+            far: 最远300米
+            超出范围的物体不会被渲染
+          -->
+        </clip>
+        
+        <noise>
+          <type>gaussian</type>
+          <mean>0.0</mean>
+          <stddev>0.007</stddev>
+          <!-- 
+            添加高斯噪声，模拟真实相机
+            可选，更真实但会影响性能
+          -->
+        </noise>
+      </camera>
+      
+      <plugin name="camera_controller" filename="libgazebo_ros_camera.so">
+      <!-- 
+        插件：libgazebo_ros_camera.so
+        功能：把Gazebo相机数据发布到ROS topic
+      -->
+      
+        <alwaysOn>true</alwaysOn>
+        <!-- 相机一直开启 -->
+        
+        <updateRate>30.0</updateRate>
+        
+        <cameraName>camera</cameraName>
+        <!-- topic前缀：/camera/... -->
+        
+        <imageTopicName>image_raw</imageTopicName>
+        <!-- 
+          发布图像的topic: /camera/image_raw
+          消息类型: sensor_msgs/Image
+        -->
+        
+        <cameraInfoTopicName>camera_info</cameraInfoTopicName>
+        <!-- 
+          发布相机参数的topic: /camera/camera_info
+          包含相机内参、畸变系数等
+        -->
+        
+        <frameName>camera_link</frameName>
+        <!-- TF坐标系名字 -->
+        
+        <hackBaseline>0.07</hackBaseline>
+        <!-- 仅用于双目相机，单目忽略 -->
+        
+        <distortionK1>0.0</distortionK1>
+        <distortionK2>0.0</distortionK2>
+        <distortionK3>0.0</distortionK3>
+        <distortionT1>0.0</distortionT1>
+        <distortionT2>0.0</distortionT2>
+        <!-- 
+          畸变参数，模拟镜头畸变
+          0表示无畸变（理想相机）
+        -->
+      </plugin>
+    </sensor>
+  </gazebo>
+
+
+  <!-- ========== 第十一部分：Gazebo材质颜色 ========== -->
+  <!-- 
+    前面在URDF里定义的颜色只在RViz里显示
+    在Gazebo里需要用Gazebo专用的材质
+  -->
+  <gazebo reference="base_link">
+    <material>Gazebo/Blue</material>
+  </gazebo>
+
+  <gazebo reference="gimbal_yaw_base">
+    <material>Gazebo/Grey</material>
+  </gazebo>
+
+  <gazebo reference="gimbal_pitch_link">
+    <material>Gazebo/Red</material>
+  </gazebo>
+
+  <gazebo reference="camera_link">
+    <material>Gazebo/Green</material>
+  </gazebo>
+  
+  <!-- 
+    Gazebo预定义材质：
+    Gazebo/Red, Gazebo/Blue, Gazebo/Green, Gazebo/Yellow,
+    Gazebo/Black, Gazebo/Grey, Gazebo/White, Gazebo/Wood, 等等
+  -->
+
+</robot>
+<!-- xacro文件结束 -->
